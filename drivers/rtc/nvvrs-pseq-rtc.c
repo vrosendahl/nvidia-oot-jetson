@@ -142,7 +142,6 @@ static int nvvrs_rtc_update_alarm_reg(struct i2c_client *client,
 	}
 
 out:
-	mutex_unlock(&info->lock);
 	return ret;
 }
 
@@ -151,6 +150,8 @@ static int nvvrs_rtc_disable_alarm(struct nvvrs_rtc_info *info)
 	struct i2c_client *client = info->client;
 	u8 val[REG_LEN_IN_BYTES];
 	int ret;
+
+	mutex_lock(&info->lock);
 
 	/* Clear RTC_WAKE bit */
 	ret = nvvrs_update_bits(info, info->drv_data->map[CTL2_REG],
@@ -180,6 +181,7 @@ static int nvvrs_rtc_disable_alarm(struct nvvrs_rtc_info *info)
 		goto out;
 	}
 out:
+	mutex_unlock(&info->lock);
 	return ret;
 }
 
