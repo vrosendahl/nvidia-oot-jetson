@@ -510,6 +510,14 @@ static int scf_uncore_event_init(struct perf_event *event)
 	pdev = uncore_pmu->pdev;
 
 	/*
+	 * Only claim events that explicitly target this PMU's dynamic type.
+	 * This lets generic CPU events (e.g. PERF_TYPE_HARDWARE cpu-cycles)
+	 * be handled by the CPU PMU instead of us returning EOPNOTSUPP.
+	 */
+	if (event->attr.type != uncore_pmu->pmu.type)
+		return -ENOENT;
+
+	/*
 	 * The uncore counters are shared by all CPU cores. Therefore it does not
 	 * support sampling mode or attach to a task (per-process mode).
 	 */
