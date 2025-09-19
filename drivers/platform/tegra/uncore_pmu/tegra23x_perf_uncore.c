@@ -4,6 +4,7 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/bitops.h>
+#include <linux/cpumask.h>
 #include <linux/errno.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
@@ -113,9 +114,30 @@ static struct attribute_group scf_uncore_pmu_format_group = {
 	.attrs = scf_uncore_pmu_formats,
 };
 
+/*
+ * Advertise that this PMU is effectively pinned to CPU0.
+ * Show cpumask in the standard bitmap-list format used by perf PMUs.
+ */
+static ssize_t cpumask_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
+{
+	return cpumap_print_to_pagebuf(true, buf, cpumask_of(0));
+}
+
+static DEVICE_ATTR_RO(cpumask);
+
+static struct attribute *scf_uncore_pmu_cpumask_attrs[] = {
+	&dev_attr_cpumask.attr,
+	NULL,
+};
+static const struct attribute_group scf_uncore_pmu_cpumask_group = {
+	.attrs = scf_uncore_pmu_cpumask_attrs,
+};
+
 static const struct attribute_group *scf_uncore_pmu_attr_grps[] = {
 	&scf_uncore_pmu_events_group,
 	&scf_uncore_pmu_format_group,
+	&scf_uncore_pmu_cpumask_group,
 	NULL,
 };
 
@@ -537,6 +559,9 @@ static int scf_uncore_event_init(struct perf_event *event)
 	/* Event is valid, hw not allocated yet */
 	hwc->idx = -1;
 	hwc->config_base = event->attr.config;
+
+	/* Steer all events of this PMU to use CPU0 */
+	event->cpu = 0;
 
 	return 0;
 }
