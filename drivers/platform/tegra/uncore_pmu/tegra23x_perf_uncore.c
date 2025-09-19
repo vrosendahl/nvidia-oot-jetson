@@ -4,6 +4,7 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/bitops.h>
+#include <linux/cpumask.h>
 #include <linux/errno.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
@@ -124,9 +125,31 @@ static struct attribute_group scf_uncore_pmu_format_group = {
 	.attrs = scf_uncore_pmu_formats,
 };
 
+/*
+ * Advertise that this PMU is effectively pinned to CPU0.
+ * Show cpumask in the standard bitmap-list format used by perf PMUs.
+ */
+static ssize_t scf_uncore_cpumask_show(struct device *dev,
+				       struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%*pbl\n",
+			 cpumask_pr_args(cpumask_of(0)));
+}
+/* Use explicit show handler to avoid the implicit cpumask_show name */
+static DEVICE_ATTR(cpumask, 0444, scf_uncore_cpumask_show, NULL);
+
+static struct attribute *scf_uncore_pmu_cpumask_attrs[] = {
+	&dev_attr_cpumask.attr,
+	NULL,
+};
+static const struct attribute_group scf_uncore_pmu_cpumask_group = {
+	.attrs = scf_uncore_pmu_cpumask_attrs,
+};
+
 static const struct attribute_group *scf_uncore_pmu_attr_grps[] = {
 	&scf_uncore_pmu_events_group,
 	&scf_uncore_pmu_format_group,
+	&scf_uncore_pmu_cpumask_group,
 	NULL,
 };
 
@@ -512,6 +535,15 @@ static int scf_uncore_event_init(struct perf_event *event)
 	 */
 	if (event->cpu < 0) {
 		dev_err(&pdev->dev, "Can't support per-task counters\n");
+		return -EINVAL;
+	}
+
+	/*
+	 * This uncore PMU is serviced on CPU0 only. Reject events pinned to any
+	 * other CPU to avoid silent no-ops and make scheduling explicit.
+	 */
+	if (event->cpu != 0) {
+		dev_err(&pdev->dev, "SCF PMU events must target CPU0 (try: perf stat -C 0 ...)\n");
 		return -EINVAL;
 	}
 
