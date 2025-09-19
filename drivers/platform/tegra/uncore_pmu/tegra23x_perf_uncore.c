@@ -54,17 +54,6 @@
 #define SCF_CACHE							0xF2
 #define SCF_CACHE_WB					0xF3
 
-#define NV_INT_SNOC_START			0xD000
-#define NV_INT_SNOC_END				0xD0FF
-
-#define NV_INT_SCFc_START			0xD100
-#define NV_INT_SCFc_END				0xD1FF
-
-#define NV_INT_ACI_START			0xD200
-#define NV_INT_ACI_END				0xD2FF
-
-#define PRE_SI_FPGA	2
-
 static ssize_t scf_uncore_event_sysfs_show(struct device *dev,
 											  struct device_attribute *attr, char *page)
 {
@@ -562,10 +551,6 @@ static int scf_uncore_event_init(struct perf_event *event)
 		case SCF_CACHE_ALLOCATE ... SCF_CACHE_WB:
 			if (unit_id != PMSELR_UNIT_SCF_SCF)
 				return -ENOENT;
-			break;
-		case NV_INT_SNOC_START ... NV_INT_SNOC_END:
-		case NV_INT_SCFc_START ... NV_INT_SCFc_END:
-		case NV_INT_ACI_START ... NV_INT_ACI_END:
 			break;
 		default:
 			return -ENOENT;
