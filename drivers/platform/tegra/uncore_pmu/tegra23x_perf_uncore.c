@@ -574,7 +574,6 @@ static int scf_pmu_device_probe(struct platform_device *pdev)
 		.stop			= scf_uncore_event_stop,
 		.read			= scf_uncore_event_read,
 		.attr_groups	= scf_uncore_pmu_attr_grps,
-		.type			= PERF_TYPE_HARDWARE,
 	};
 
 	uncore_pmu->pdev = pdev;
