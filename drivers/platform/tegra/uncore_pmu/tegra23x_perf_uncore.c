@@ -495,6 +495,14 @@ static int scf_uncore_event_init(struct perf_event *event)
 	u32 unit_id;
 	u32 event_id;
 
+	/*
+	 * Only claim events that explicitly target this PMU's dynamic type.
+	 * This lets generic CPU events (e.g. PERF_TYPE_HARDWARE cpu-cycles)
+	 * be handled by the CPU PMU instead of us returning EOPNOTSUPP.
+	 */
+	if (event->attr.type != event->pmu->type)
+		return -ENOENT;
+
 	uncore_pmu = to_uncore_pmu(event->pmu);
 	pdev = uncore_pmu->pdev;
 
