@@ -609,7 +609,6 @@ static int scf_pmu_device_remove(struct platform_device *pdev)
 	struct uncore_pmu *uncore_pmu = platform_get_drvdata(pdev);
 
 	perf_pmu_unregister(&uncore_pmu->pmu);
-	kfree(uncore_pmu);
 	dev_info(&pdev->dev, "Unregistered T23x SCF Uncore PMU\n");
 
 	return 0;
