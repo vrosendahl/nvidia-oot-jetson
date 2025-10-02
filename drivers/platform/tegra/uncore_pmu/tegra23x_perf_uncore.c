@@ -65,6 +65,21 @@
 
 #define PRE_SI_FPGA	2
 
+struct uncore_unit {
+	u32 nv_group_id;
+	u32 nv_unit_id;
+	struct perf_event *events[UNIT_CTRS];
+	DECLARE_BITMAP(used_ctrs, UNIT_CTRS);
+};
+
+struct uncore_pmu {
+	struct platform_device *pdev;
+	struct pmu pmu;
+	struct uncore_unit scf;
+	int cpu;
+	struct hlist_node cpuhp_node;
+};
+
 static ssize_t scf_uncore_event_sysfs_show(struct device *dev,
 											  struct device_attribute *attr, char *page)
 {
@@ -125,14 +140,23 @@ static struct attribute_group scf_uncore_pmu_format_group = {
 	.attrs = scf_uncore_pmu_formats,
 };
 
+static inline struct uncore_pmu *to_uncore_pmu(struct pmu *pmu)
+{
+	return container_of(pmu, struct uncore_pmu, pmu);
+}
+
 /*
- * Advertise that this PMU is effectively pinned to CPU0.
- * Show cpumask in the standard bitmap-list format used by perf PMUs.
+ * Advertise the CPU that services this PMU. We expose a single-CPU cpumask
+ * so perf can schedule events appropriately.
  */
 static ssize_t cpumask_show(struct device *dev,
 			    struct device_attribute *attr, char *buf)
 {
-	return cpumap_print_to_pagebuf(true, buf, cpumask_of(0));
+	struct pmu *pmu = dev_get_drvdata(dev);
+	struct uncore_pmu *uncore_pmu = to_uncore_pmu(pmu);
+
+	return cpumap_print_to_pagebuf(true, buf,
+				       cpumask_of(uncore_pmu->cpu));
 }
 
 static DEVICE_ATTR_RO(cpumask);
@@ -151,24 +175,6 @@ static const struct attribute_group *scf_uncore_pmu_attr_grps[] = {
 	&scf_uncore_pmu_cpumask_group,
 	NULL,
 };
-
-struct uncore_unit {
-	u32 nv_group_id;
-	u32 nv_unit_id;
-	struct perf_event *events[UNIT_CTRS];
-	DECLARE_BITMAP(used_ctrs, UNIT_CTRS);
-};
-
-struct uncore_pmu {
-	struct platform_device *pdev;
-	struct pmu pmu;
-	struct uncore_unit scf;
-};
-
-static inline struct uncore_pmu *to_uncore_pmu(struct pmu *pmu)
-{
-	return container_of(pmu, struct uncore_pmu, pmu);
-}
 
 static inline struct uncore_unit *get_unit(
 		struct uncore_pmu *uncore_pmu, u32 unit_id)
@@ -285,15 +291,15 @@ static void scf_uncore_event_set_period(
 
 static void scf_uncore_event_start(struct perf_event *event, int flags) {
 
-	struct uncore_pmu *uncore_pmu;
+	struct uncore_pmu *uncore_pmu = to_uncore_pmu(event->pmu);
 	struct uncore_unit *uncore_unit;
 	struct hw_perf_event *hwc = &event->hw;
 	u32 idx = hwc->idx;
 	u32 unit_id;
 	u32 event_id;
 
-	/* CPU0 does all uncore counting */
-	if (event->cpu != 0)
+	/* Only the designated CPU services the uncore PMU. */
+	if (event->cpu != uncore_pmu->cpu)
 		return;
 
 	/* We always reprogram the counter */
@@ -301,7 +307,6 @@ static void scf_uncore_event_start(struct perf_event *event, int flags) {
 		WARN_ON(!(hwc->state & PERF_HES_UPTODATE));
 
 	unit_id = CONFIG_UNIT(event->attr.config);
-	uncore_pmu = to_uncore_pmu(event->pmu);
 	uncore_unit = get_unit(uncore_pmu, unit_id);
 
 	if (unlikely(uncore_unit == NULL))
@@ -345,21 +350,20 @@ static void scf_uncore_event_update(
 
 static void scf_uncore_event_stop(struct perf_event *event, int flags)
 {
-	struct uncore_pmu *uncore_pmu;
+	struct uncore_pmu *uncore_pmu = to_uncore_pmu(event->pmu);
 	struct uncore_unit *uncore_unit;
 	struct hw_perf_event *hwc = &event->hw;
 	u32 idx = hwc->idx;
 	u32 unit_id;
 
-	/* CPU0 does all uncore counting */
-	if (event->cpu != 0)
+	/* Only the designated CPU services the uncore PMU. */
+	if (event->cpu != uncore_pmu->cpu)
 		return;
 
 	if (event->hw.state & PERF_HES_STOPPED)
 		return;
 
 	unit_id = CONFIG_UNIT(event->attr.config);
-	uncore_pmu = to_uncore_pmu(event->pmu);
 	uncore_unit = get_unit(uncore_pmu, unit_id);
 
 	if (unlikely(uncore_unit == NULL))
@@ -381,19 +385,18 @@ static void scf_uncore_event_stop(struct perf_event *event, int flags)
  */
 static int scf_uncore_event_add(struct perf_event *event, int flags)
 {
-	struct uncore_pmu *uncore_pmu;
+	struct uncore_pmu *uncore_pmu = to_uncore_pmu(event->pmu);
 	struct uncore_unit *uncore_unit;
 	struct platform_device *pdev;
 	struct hw_perf_event *hwc = &event->hw;
 	u32 unit_id;
 	u32 idx;
 
-	/* CPU0 does all uncore counting */
-	if (event->cpu != 0)
+	/* Only the designated CPU services the uncore PMU. */
+	if (event->cpu != uncore_pmu->cpu)
 		return 0;
 
 	unit_id = CONFIG_UNIT(event->attr.config);
-	uncore_pmu = to_uncore_pmu(event->pmu);
 	uncore_unit = get_unit(uncore_pmu, unit_id);
 	pdev = uncore_pmu->pdev;
 
@@ -421,18 +424,17 @@ static int scf_uncore_event_add(struct perf_event *event, int flags)
 
 static void scf_uncore_event_del(struct perf_event *event, int flags)
 {
-	struct uncore_pmu *uncore_pmu;
+	struct uncore_pmu *uncore_pmu = to_uncore_pmu(event->pmu);
 	struct uncore_unit *uncore_unit;
 	struct hw_perf_event *hwc = &event->hw;
 	u32 unit_id;
 	u32 idx = hwc->idx;
 
-	/* CPU0 does all uncore counting */
-	if (event->cpu != 0)
+	/* Only the designated CPU services the uncore PMU. */
+	if (event->cpu != uncore_pmu->cpu)
 		return;
 
 	unit_id = CONFIG_UNIT(event->attr.config);
-	uncore_pmu = to_uncore_pmu(event->pmu);
 	uncore_unit = get_unit(uncore_pmu, unit_id);
 
 	if (unlikely(uncore_unit == NULL))
@@ -448,16 +450,15 @@ static void scf_uncore_event_del(struct perf_event *event, int flags)
 
 static void scf_uncore_event_read(struct perf_event *event)
 {
-	struct uncore_pmu *uncore_pmu;
+	struct uncore_pmu *uncore_pmu = to_uncore_pmu(event->pmu);
 	struct uncore_unit *uncore_unit;
 	u32 unit_id;
 
-	/* CPU0 does all uncore counting */
-	if (event->cpu != 0)
+	/* Only the designated CPU services the uncore PMU. */
+	if (event->cpu != uncore_pmu->cpu)
 		return;
 
 	unit_id = CONFIG_UNIT(event->attr.config);
-	uncore_pmu = to_uncore_pmu(event->pmu);
 	uncore_unit = get_unit(uncore_pmu, unit_id);
 
 	if (unlikely(uncore_unit == NULL))
@@ -505,6 +506,32 @@ static irqreturn_t scf_handle_irq(int irq_num, void *data)
 
 	return IRQ_HANDLED;
 }
+
+/*
+ * CPU hotplug: migrate PMU context if the designated CPU goes offline
+ * Nothing to do when CPUs come online; we keep the current CPU.
+ */
+static int scf_pmu_cpuhp_offline(unsigned int cpu, struct hlist_node *node)
+{
+	struct uncore_pmu *pmu = hlist_entry(node, struct uncore_pmu,
+					      cpuhp_node);
+	int new_cpu;
+
+	if (cpu != pmu->cpu)
+		return 0;
+
+	/* Pick a new online CPU (other than the one going offline). */
+	new_cpu = cpumask_any_but(cpu_online_mask, cpu);
+	if (new_cpu >= nr_cpu_ids)
+		return 0;
+
+	perf_pmu_migrate_context(&pmu->pmu, cpu, new_cpu);
+	pmu->cpu = new_cpu;
+
+	return 0;
+}
+
+static enum cpuhp_state scf_pmu_cpuhp_state;
 
 /*
  * event_init: Verify this PMU can handle the desired event
@@ -575,8 +602,8 @@ static int scf_uncore_event_init(struct perf_event *event)
 	hwc->idx = -1;
 	hwc->config_base = event->attr.config;
 
-	/* Steer all events of this PMU to use CPU0 */
-	event->cpu = 0;
+	/* Steer all events of this PMU to use the designated CPU */
+	event->cpu = uncore_pmu->cpu;
 
 	return 0;
 }
@@ -625,20 +652,41 @@ static int scf_pmu_device_probe(struct platform_device *pdev)
 		return err;
 	}
 
+	/*
+	 * Choose a designated CPU to service this PMU, and expose it to
+	 * userspace via /sys/devices/scf_pmu/cpumask so perf schedules events
+	 * correctly.
+	 */
+	uncore_pmu->cpu = smp_processor_id();
+	/* Hook into CPU hotplug so we can migrate context if needed. */
+	err = cpuhp_state_add_instance_nocalls(scf_pmu_cpuhp_state,
+					       &uncore_pmu->cpuhp_node) {
+		dev_err(&pdev->dev, "Error %d registering hotplug\n", ret);
+		return err;
+	}
+
 	err = perf_pmu_register(&uncore_pmu->pmu, uncore_pmu->pmu.name, -1);
 	if (err) {
 		dev_err(&pdev->dev, "Error %d registering T23x SCF Uncore PMU\n", err);
-		return err;
+		goto error;
 	}
 
 	dev_info(&pdev->dev, "Registered T23x SCF Uncore PMU\n");
 
 	return 0;
+
+error:
+	cpuhp_state_remove_instance_nocalls(scf_pmu_cpuhp_state,
+					    &uncore_pmu->cpuhp_node));
+	return err;
 }
 
 static int scf_pmu_device_remove(struct platform_device *pdev)
 {
 	struct uncore_pmu *uncore_pmu = platform_get_drvdata(pdev);
+
+	cpuhp_state_remove_instance_nocalls(scf_pmu_cpuhp_state,
+					    &uncore_pmu->cpuhp_node);
 
 	perf_pmu_unregister(&uncore_pmu->pmu);
 	dev_info(&pdev->dev, "Unregistered T23x SCF Uncore PMU\n");
@@ -663,12 +711,23 @@ static struct platform_driver scf_pmu_driver = {
 
 static int __init register_pmu_driver(void)
 {
-	return platform_driver_register(&scf_pmu_driver);
+	int ret = cpuhp_setup_state_multi(CPUHP_AP_ONLINE_DYN,
+					    "perf/tegra23x_scf:online",
+					    NULL,
+					    scf_pmu_cpuhp_offline);
+	if (ret < 0)
+		return ret;
+	scf_pmu_cpuhp_state = ret;
+	ret = platform_driver_register(&scf_pmu_driver);
+	if (ret)
+		cpuhp_remove_multi_state(scf_pmu_cpuhp_state);
+	return ret;
 }
 
 static void __exit unregister_pmu_driver(void)
 {
-	return platform_driver_unregister(&scf_pmu_driver);
+	platform_driver_unregister(&scf_pmu_driver);
+	cpuhp_remove_multi_state(scf_pmu_cpuhp_state);
 }
 
 module_init(register_pmu_driver);
