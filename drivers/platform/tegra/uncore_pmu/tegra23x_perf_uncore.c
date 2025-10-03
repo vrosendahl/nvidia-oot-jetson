@@ -561,17 +561,6 @@ static int scf_uncore_event_init(struct perf_event *event)
 		return -EINVAL;
 	}
 
-	/*
-	 * This uncore PMU is serviced on a single "designated" CPU.
-	 * Reject events pinned to any other CPU to avoid silent no-ops
-	 * and make scheduling explicit (perf consults /cpumask).
-	 */
-	if (event->cpu != uncore_pmu->cpu) {
-		dev_err(&pdev->dev, "SCF PMU events must target CPU%d (see cpumask)\n",
-			uncore_pmu->cpu);
-		return -EINVAL;
-	}
-
 	unit_id = CONFIG_UNIT(event->attr.config);
 	event_id = CONFIG_EVENT(event->attr.config);
 
@@ -597,6 +586,9 @@ static int scf_uncore_event_init(struct perf_event *event)
 	/* Event is valid, hw not allocated yet */
 	hwc->idx = -1;
 	hwc->config_base = event->attr.config;
+
+	/* Enforce the use of the designated CPU */
+	event->cpu = uncore_pmu->cpu;
 
 	return 0;
 }
