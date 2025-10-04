@@ -288,8 +288,10 @@ static void scf_uncore_event_start(struct perf_event *event, int flags) {
 	u32 event_id;
 
 	/* Only the designated CPU services the uncore PMU. */
-	if (event->cpu != uncore_pmu->cpu)
+	if (event->cpu != uncore_pmu->cpu) {
+		pr_err("viktor:%s(1)\n", __func__);
 		return;
+	}
 
 	/* We always reprogram the counter */
 	if (flags & PERF_EF_RELOAD)
@@ -298,8 +300,10 @@ static void scf_uncore_event_start(struct perf_event *event, int flags) {
 	unit_id = CONFIG_UNIT(event->attr.config);
 	uncore_unit = get_unit(uncore_pmu, unit_id);
 
-	if (unlikely(uncore_unit == NULL))
+	if (unlikely(uncore_unit == NULL)) {
+		pr_err("viktor:%s(2)\n", __func__);
 		return;
+	}
 
 	hwc->state = 0;
 
@@ -346,17 +350,23 @@ static void scf_uncore_event_stop(struct perf_event *event, int flags)
 	u32 unit_id;
 
 	/* Only the designated CPU services the uncore PMU. */
-	if (event->cpu != uncore_pmu->cpu)
+	if (event->cpu != uncore_pmu->cpu) {
+		pr_err("viktor:%s(1)\n", __func__);
 		return;
+	}
 
-	if (event->hw.state & PERF_HES_STOPPED)
+	if (event->hw.state & PERF_HES_STOPPED) {
+		pr_err("viktor:%s(2)\n", __func__);
 		return;
+	}
 
 	unit_id = CONFIG_UNIT(event->attr.config);
 	uncore_unit = get_unit(uncore_pmu, unit_id);
 
-	if (unlikely(uncore_unit == NULL))
+	if (unlikely(uncore_unit == NULL)) {
+		pr_err("viktor:%s(3)\n", __func__);
 		return;
+	}
 
 	/* Stop counter and disable interrupt */
 	mce_perfmon_write(uncore_unit, NV_PMCNTENCLR, 0, BIT(idx));
@@ -382,8 +392,10 @@ static int scf_uncore_event_add(struct perf_event *event, int flags)
 	u32 idx;
 
 	/* Only the designated CPU services the uncore PMU. */
-	if (event->cpu != uncore_pmu->cpu)
+	if (event->cpu != uncore_pmu->cpu) {
+		pr_err("viktor:%s(1)\n", __func__);
 		return 0;
+	}
 
 	unit_id = CONFIG_UNIT(event->attr.config);
 	uncore_unit = get_unit(uncore_pmu, unit_id);
@@ -391,13 +403,16 @@ static int scf_uncore_event_add(struct perf_event *event, int flags)
 
 	if (!uncore_unit) {
 		dev_err(&pdev->dev, "Unsupported unit id: %u\n", unit_id);
+		pr_err("viktor:%s(2)\n", __func__);
 		return -EINVAL;
 	}
 
 	idx = find_first_zero_bit(uncore_unit->used_ctrs, UNIT_CTRS);
 	/* All counters are in use */
-	if (idx == UNIT_CTRS)
+	if (idx == UNIT_CTRS) {
+		pr_err("viktor:%s(3)\n", __func__);
 		return -EOPNOTSUPP;
+	}
 
 	set_bit(idx, uncore_unit->used_ctrs);
 	uncore_unit->events[idx] = event;
@@ -420,14 +435,18 @@ static void scf_uncore_event_del(struct perf_event *event, int flags)
 	u32 idx = hwc->idx;
 
 	/* Only the designated CPU services the uncore PMU. */
-	if (event->cpu != uncore_pmu->cpu)
+	if (event->cpu != uncore_pmu->cpu) {
+		pr_err("viktor:%s(1)\n", __func__);
 		return;
+	}
 
 	unit_id = CONFIG_UNIT(event->attr.config);
 	uncore_unit = get_unit(uncore_pmu, unit_id);
 
-	if (unlikely(uncore_unit == NULL))
+	if (unlikely(uncore_unit == NULL)) {
+		pr_err("viktor:%s(2)\n", __func__);
 		return;
+	}
 
 	scf_uncore_event_stop(event, flags | PERF_EF_UPDATE);
 
@@ -444,8 +463,10 @@ static void scf_uncore_event_read(struct perf_event *event)
 	u32 unit_id;
 
 	/* Only the designated CPU services the uncore PMU. */
-	if (event->cpu != uncore_pmu->cpu)
+	if (event->cpu != uncore_pmu->cpu) {
+		pr_err("viktor:%s(1)\n", __func__);
 		return;
+	}
 
 	unit_id = CONFIG_UNIT(event->attr.config);
 	uncore_unit = get_unit(uncore_pmu, unit_id);
@@ -541,8 +562,10 @@ static int scf_uncore_event_init(struct perf_event *event)
 	 * This lets generic CPU events (e.g. PERF_TYPE_HARDWARE cpu-cycles)
 	 * be handled by the CPU PMU instead of us returning EOPNOTSUPP.
 	 */
-	if (event->attr.type != uncore_pmu->pmu.type)
+	if (event->attr.type != uncore_pmu->pmu.type) {
+		pr_err("viktor:%s(1)\n", __func__);
 		return -ENOENT;
+	}
 
 	/*
 	 * The uncore counters are shared by all CPU cores. Therefore it does not
@@ -550,6 +573,7 @@ static int scf_uncore_event_init(struct perf_event *event)
 	 */
 	if (is_sampling_event(event) || event->attach_state & PERF_ATTACH_TASK) {
 		dev_dbg(&pdev->dev, "Can't support sampling events\n");
+		pr_err("viktor:%s(2)\n", __func__);
 		return -EOPNOTSUPP;
 	}
 
@@ -558,6 +582,7 @@ static int scf_uncore_event_init(struct perf_event *event)
 	 */
 	if (event->cpu < 0) {
 		dev_err(&pdev->dev, "Can't support per-task counters\n");
+		pr_err("viktor:%s(3)\n", __func__);
 		return -EINVAL;
 	}
 
@@ -566,6 +591,7 @@ static int scf_uncore_event_init(struct perf_event *event)
 
 	if (!get_unit(uncore_pmu, unit_id)) {
 		dev_dbg(&pdev->dev, "Unsupported unit id: %u\n", unit_id);
+		pr_err("viktor:%s(4)\n", __func__);
 		return -EINVAL;
 	}
 
@@ -579,6 +605,7 @@ static int scf_uncore_event_init(struct perf_event *event)
 				return -ENOENT;
 			break;
 		default:
+			pr_err("viktor:%s(5\n", __func__);
 			return -ENOENT;
 			break;
 	}
@@ -590,6 +617,7 @@ static int scf_uncore_event_init(struct perf_event *event)
 	/* Enforce the use of the designated CPU */
 	event->cpu = uncore_pmu->cpu;
 
+	pr_err("viktor:%s(6)\n", __func__);
 	return 0;
 }
 
