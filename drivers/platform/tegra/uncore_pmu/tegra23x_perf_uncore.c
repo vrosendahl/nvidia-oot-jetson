@@ -130,6 +130,11 @@ static struct attribute_group scf_uncore_pmu_format_group = {
 	.attrs = scf_uncore_pmu_formats,
 };
 
+static inline struct uncore_pmu *to_uncore_pmu(struct pmu *pmu)
+{
+	return container_of(pmu, struct uncore_pmu, pmu);
+}
+
 /*
  * Advertise the CPU that services this PMU. We expose a single-CPU cpumask
  * so perf can schedule events appropriately.
@@ -137,10 +142,11 @@ static struct attribute_group scf_uncore_pmu_format_group = {
 static ssize_t cpumask_show(struct device *dev,
 			    struct device_attribute *attr, char *buf)
 {
-	struct uncore_pmu *pmu = dev_get_drvdata(dev);
+	struct pmu *pmu = dev_get_drvdata(dev);
+	struct uncore_pmu *uncore_pmu = to_uncore_pmu(pmu);
 
 	return cpumap_print_to_pagebuf(true, buf,
-				       cpumask_of(pmu->cpu));
+				       cpumask_of(uncore_pmu->cpu));
 }
 
 static DEVICE_ATTR_RO(cpumask);
@@ -159,11 +165,6 @@ static const struct attribute_group *scf_uncore_pmu_attr_grps[] = {
 	&scf_uncore_pmu_cpumask_group,
 	NULL,
 };
-
-static inline struct uncore_pmu *to_uncore_pmu(struct pmu *pmu)
-{
-	return container_of(pmu, struct uncore_pmu, pmu);
-}
 
 static inline struct uncore_unit *get_unit(
 		struct uncore_pmu *uncore_pmu, u32 unit_id)
@@ -651,8 +652,6 @@ static int scf_pmu_device_probe(struct platform_device *pdev)
 	 * via /sys/devices/scf_pmu/cpumask so perf schedules events correctly.
 	 */
 	uncore_pmu->cpu = smp_processor_id();
-	/* Allow sysfs handlers to retrieve uncore_pmu from the PMU device */
-	dev_set_drvdata(uncore_pmu->pmu.dev, uncore_pmu);
 	WARN_ON(irq_set_affinity_hint(irq, cpumask_of(uncore_pmu->cpu)));
 	/* Hook into CPU hotplug so we can migrate context if needed. */
 	WARN_ON(cpuhp_state_add_instance_nocalls(scf_pmu_cpuhp_state, &uncore_pmu->cpuhp_node));
